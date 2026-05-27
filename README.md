@@ -32,21 +32,16 @@ codex plugin marketplace add lucastononro/notify
 codex plugin add notify@notify-marketplace
 ```
 
-(The Codex subcommand is `plugin add`, not `install`. Use `codex plugin list` to see it and `codex plugin remove notify` to undo.)
+The subcommand is `plugin add`, not `install`. Then `codex plugin list` shows it (`installed, enabled`) and `codex mcp list` shows the `notify` server; `codex plugin remove notify` undoes it.
 
-Or wire it up manually (the most reliable path today):
+Verified on the Codex CLI: `marketplace add` → `plugin add` installs the plugin, bundles the skill, and registers the `notify` MCP server with the same path-free `uvx` command used by Claude Code. If you'd rather wire just the server up by hand:
 
 ```bash
-# 1. install the skill
-mkdir -p ~/.agents/skills
-cp -r codex-plugin/notify/skills/notify ~/.agents/skills/notify
-
-# 2. register the MCP server (path-free, from git)
 codex mcp add notify -- \
   uvx --from "git+https://github.com/lucastononro/notify#subdirectory=mcp-server" notify-mcp
 ```
 
-> **Codex support is implemented but has not been run against a live `codex` install.** The skill format (`SKILL.md` with `name`/`description`) and the MCP wiring follow OpenAI's published [skills](https://developers.openai.com/codex/skills) / [plugin](https://developers.openai.com/codex/plugins/build) / [MCP](https://developers.openai.com/codex/mcp) docs, but the plugin-marketplace details (the exact `.mcp.json` shape and `agents/openai.yaml` MCP-dependency form for a *stdio* server) are thinly documented — the manual `codex mcp add` path above is the dependable fallback. Issues/PRs welcome.
+> Verified end-to-end on a live `codex` install: marketplace add → plugin add installs the plugin, bundles the skill, and registers the `notify` MCP server, and asking Codex to ping plays the sound + speaks. Built per OpenAI's [skills](https://developers.openai.com/codex/skills) / [plugin](https://developers.openai.com/codex/plugins/build) / [MCP](https://developers.openai.com/codex/mcp) docs.
 
 ### Prerequisites
 
