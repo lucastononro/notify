@@ -10,7 +10,13 @@
   "plugins": [
     {
       "name": "notify",
-      "source": { "path": "./codex-plugin/notify" },
+      "source": {
+        "source": "local",
+        "path": "./codex-plugin/notify"
+      },
+      "policy": {
+        "installation": "AVAILABLE"
+      },
       "description": "Plays a sound and/or speaks a short, speech-friendly status update to get your attention when a long task finishes, blocks, or needs a decision. Ships a path-free uvx MCP server.",
       "category": "Productivity",
       "keywords": ["notify", "tts", "text-to-speech", "sound", "voice", "attention", "mcp"],
