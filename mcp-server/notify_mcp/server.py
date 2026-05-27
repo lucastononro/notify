@@ -1,23 +1,21 @@
-#!/usr/bin/env -S uv run --script
-# /// script
-# requires-python = ">=3.11"
-# dependencies = ["mcp[cli]>=1.2.0"]
-# ///
 """MCP notify server — speak short beats with pauses, optionally preceded by a sound.
 
 Cross-platform:
   - macOS  (tested):    `say` for speech, `afplay` for system sounds.
   - Windows (UNTESTED): PowerShell System.Speech for speech, winsound for sounds.
+  - Linux  (UNTESTED):  spd-say/espeak for speech, canberra-gtk-play/paplay for sounds.
 
 The two tools (`notify`, `play_sound`) expose the same signatures on every platform;
 the platform layer below picks the right backend. Every backend call is guarded so a
-missing voice/sound never crashes the server — it returns a descriptive string instead.
+missing voice/sound/player never crashes the server — it returns a descriptive string
+instead. Run it with `notify-mcp` (console entry point) or `python -m notify_mcp.server`.
 """
 
 from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -31,6 +29,8 @@ if sys.platform == "darwin":
     PLATFORM = "mac"
 elif sys.platform == "win32" or os.name == "nt":
     PLATFORM = "win"
+elif sys.platform.startswith("linux"):
+    PLATFORM = "linux"
 else:
     PLATFORM = "other"
 
@@ -48,7 +48,7 @@ VOICE_PRIORITY = [
 
 # --- Sound catalog ------------------------------------------------------------------
 # The public sound names are platform-agnostic. Each maps to a macOS system sound and,
-# for portability, to a semantic CATEGORY used to pick a Windows equivalent.
+# for portability, to a semantic CATEGORY used to pick a Windows/Linux equivalent.
 MAC_SOUNDS = {
     name.lower(): f"/System/Library/Sounds/{name}.aiff"
     for name in [
@@ -58,7 +58,7 @@ MAC_SOUNDS = {
     ]
 }
 
-# sound name -> semantic category (drives the Windows fallback)
+# sound name -> semantic category (drives the Windows/Linux fallbacks)
 SOUND_CATEGORY = {
     "hero": "success", "glass": "neutral", "sosumi": "blocked", "basso": "error",
     "funk": "warning", "ping": "fyi", "tink": "fyi", "submarine": "attention",
@@ -87,6 +87,17 @@ WIN_BEEP_FLAG = {
     "attention": _MB["MB_ICONASTERISK"], "warning": _MB["MB_ICONEXCLAMATION"],
     "blocked": _MB["MB_ICONEXCLAMATION"], "error": _MB["MB_ICONHAND"],
 }
+
+# Linux: freedesktop sound theme event names (canberra) and oga file basenames.
+LINUX_CANBERRA_EVENT = {
+    "success": "complete", "neutral": "bell", "fyi": "message",
+    "attention": "message-new-instant", "warning": "dialog-warning",
+    "blocked": "dialog-warning", "error": "dialog-error",
+}
+LINUX_OGA_DIRS = [
+    "/usr/share/sounds/freedesktop/stereo",
+    "/usr/share/sounds/gnome/default/alerts",
+]
 
 _voice_cache: str | None = None
 
@@ -137,6 +148,7 @@ def _play(sound: str) -> bool:
     name = sound.lower()
     if name not in SOUND_CATEGORY:
         return False
+    category = SOUND_CATEGORY[name]
 
     if PLATFORM == "mac":
         path = MAC_SOUNDS.get(name)
@@ -146,12 +158,10 @@ def _play(sound: str) -> bool:
         return False
 
     if PLATFORM == "win":
-        category = SOUND_CATEGORY[name]
         try:
             import winsound  # Windows-only stdlib module
         except Exception:
             return False
-        # Prefer a real media wav for the category; fall back to a system beep.
         for fname in WIN_WAV_CANDIDATES.get(category, []):
             wav = WIN_MEDIA / fname
             if wav.exists():
@@ -165,6 +175,30 @@ def _play(sound: str) -> bool:
             return True
         except Exception:
             return False
+
+    if PLATFORM == "linux":
+        # Prefer the freedesktop sound theme via canberra; else play an .oga directly.
+        if shutil.which("canberra-gtk-play"):
+            event = LINUX_CANBERRA_EVENT.get(category, "bell")
+            r = subprocess.run(
+                ["canberra-gtk-play", "-i", event], check=False,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            if r.returncode == 0:
+                return True
+        event = LINUX_CANBERRA_EVENT.get(category, "bell")
+        player = shutil.which("paplay") or shutil.which("ffplay") or shutil.which("aplay")
+        if player:
+            for d in LINUX_OGA_DIRS:
+                oga = Path(d) / f"{event}.oga"
+                if oga.exists():
+                    args = [player, str(oga)]
+                    if player.endswith("ffplay"):
+                        args = [player, "-autoexit", "-nodisp", "-loglevel", "quiet", str(oga)]
+                    subprocess.run(args, check=False,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    return True
+        return False
 
     return False
 
@@ -192,6 +226,14 @@ def _speak(voice: str, text: str) -> None:
         except Exception:
             pass
         return
+
+    if PLATFORM == "linux":
+        for cmd in (["spd-say", "-w", text], ["espeak-ng", text], ["espeak", text]):
+            if shutil.which(cmd[0]):
+                subprocess.run(cmd, check=False,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return
+        return
     # PLATFORM == "other": no TTS backend; silently skip (caller still returns a summary).
 
 
@@ -208,7 +250,7 @@ def notify(
 
     Each beat is spoken using a high-quality local voice (macOS picks Ava Premium
     if installed, falling back through Premium/Enhanced/legacy voices; Windows uses
-    the default SAPI voice). 100% local, free, offline.
+    the default SAPI voice; Linux uses spd-say/espeak). 100% local, free, offline.
 
     Speech-friendly rules — the model MUST follow these when composing beats:
     - Plain English sentences only. No tables, bullets, markdown, code, file
@@ -276,5 +318,10 @@ def play_sound(sound: str = "glass") -> str:
     return f"Could not play sound '{sound}' on {PLATFORM} (no audio backend available)"
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Console entry point (`notify-mcp`)."""
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,59 +1,73 @@
-# notify — Claude Code marketplace
+# notify — Claude Code & Codex plugin
 
-A 100% local, free, offline **attention skill** for [Claude Code](https://docs.claude.com/en/docs/claude-code/overview). When a long task finishes, hits a blocker, or needs a decision while you're away from the screen, Claude plays a sound — and optionally speaks a short, plain-English status update — to pull you back.
+A 100% local, free, offline **attention plugin** for [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) and [OpenAI Codex](https://developers.openai.com/codex). When a long task finishes, hits a blocker, or needs a decision while you're away from the screen, the agent plays a sound — and optionally speaks a short, plain-English status update — to pull you back.
 
-This repository is a **plugin marketplace**. It ships one plugin: `notify`, which bundles a small MCP server exposing two tools.
-
-What you get:
+One repo ships the same skill + MCP server to both agents:
 
 - 🔔 **`play_sound`** — a fast system-sound ping (`hero`, `glass`, `sosumi`, `basso`, …) for "glance at the screen".
 - 🗣️ **`notify`** — plays a sound, then speaks a sequence of short "beats" with natural pauses, using a high-quality local voice.
 - 🔒 Fully local: no API key, no network, no rate limits, no telemetry. Speech and sound come from OS built-ins.
 
-The skill enforces *speech-friendly* messages (no tables, code, file paths, or markdown read aloud) — so what Claude says actually sounds like a person talking, while the detailed text stays in the chat.
+The skill enforces *speech-friendly* messages (no tables, code, file paths, or markdown read aloud) — so what the agent says actually sounds like a person talking, while the detailed text stays in the chat.
+
+The MCP server is published as a tiny `uvx`-runnable package, so both agents reference it **path-free** with the exact same command — no bundled-script paths, no per-tool substitution variables.
 
 ---
 
 ## Install
 
-In Claude Code:
+### Claude Code
 
 ```
 /plugin marketplace add lucastononro/notify
 /plugin install notify@notify-marketplace
 ```
 
-To update later:
+Update later: `/plugin marketplace update notify-marketplace`
+
+### Codex  *(best-effort, untested — see note)*
 
 ```
-/plugin marketplace update notify-marketplace
+codex plugin marketplace add lucastononro/notify
+codex plugin install notify@notify-marketplace
 ```
+
+Or wire it up manually (the most reliable path today):
+
+```bash
+# 1. install the skill
+mkdir -p ~/.agents/skills
+cp -r codex-plugin/notify/skills/notify ~/.agents/skills/notify
+
+# 2. register the MCP server (path-free, from git)
+codex mcp add notify -- \
+  uvx --from "git+https://github.com/lucastononro/notify#subdirectory=mcp-server" notify-mcp
+```
+
+> **Codex support is implemented but has not been run against a live `codex` install.** The skill format (`SKILL.md` with `name`/`description`) and the MCP wiring follow OpenAI's published [skills](https://developers.openai.com/codex/skills) / [plugin](https://developers.openai.com/codex/plugins/build) / [MCP](https://developers.openai.com/codex/mcp) docs, but the plugin-marketplace details (the exact `.mcp.json` shape and `agents/openai.yaml` MCP-dependency form for a *stdio* server) are thinly documented — the manual `codex mcp add` path above is the dependable fallback. Issues/PRs welcome.
 
 ### Prerequisites
 
-- **[`uv`](https://docs.astral.sh/uv/)** on `PATH` — the bundled MCP server runs via `uv run --script`, which auto-installs its one dependency (`mcp[cli]`) on first launch. No manual venv.
-  - No `uv`? Install it (`curl -LsSf https://astral.sh/uv/install.sh | sh`, or `winget install astral-sh.uv` on Windows), or edit `plugins/notify/.mcp.json` to call your own Python with `mcp[cli]` installed.
-- **macOS** — uses the built-in `say` and `afplay`. Nothing to install.
-- **Windows** — uses the built-in PowerShell speech engine + `winsound`. Nothing to install. **(See platform note below — Windows is untested.)**
+- **[`uv`](https://docs.astral.sh/uv/)** on `PATH` — both agents launch the server with `uvx`, which builds + caches the package (and its one dependency, `mcp[cli]`) from git on first run. No manual venv.
+  - No `uv`? Install it: `curl -LsSf https://astral.sh/uv/install.sh | sh` (macOS/Linux) or `winget install astral-sh.uv` (Windows).
+- **macOS** — uses built-in `say` + `afplay`. Nothing to install.
+- **Windows** — built-in PowerShell speech + `winsound`. Nothing to install. *(untested — see below)*
+- **Linux** — needs a TTS tool (`spd-say` from speech-dispatcher, or `espeak`/`espeak-ng`) and a sound player (`canberra-gtk-play`, or `paplay`/`ffplay` + the freedesktop sound theme). *(untested — see below)*
 
 ---
 
 ## Use
 
-Once installed, ask Claude any of:
+Ask the agent any of:
 
 - "notify me when the build finishes"
 - "ping me when you're done"
 - "let me know when the tests pass"
 - "play a sound"
 
-…or invoke the skill explicitly:
+…or invoke explicitly: `/notify:notify` (Claude Code) or `$notify` (Codex).
 
-```
-/notify:notify
-```
-
-Claude calls the MCP tool automatically — e.g. a chime plus *"All tests passed. The branch is ready for review."*
+The agent calls the MCP tool automatically — e.g. a chime plus *"All tests passed. The branch is ready for review."*
 
 ---
 
@@ -62,10 +76,10 @@ Claude calls the MCP tool automatically — e.g. a chime plus *"All tests passed
 | Platform | Status | Speech | Sound |
 | -------- | ------ | ------ | ----- |
 | macOS    | ✅ tested | `say` (auto-picks best neural voice — Ava Premium → … → Samantha) | `afplay` of `/System/Library/Sounds/*.aiff` |
-| Windows  | ⚠️ **best-effort, untested** | PowerShell `System.Speech` (default SAPI voice) | `winsound` → closest `%WINDIR%\Media` file, falling back to a system beep |
-| Linux    | ➖ not supported | — | — |
+| Windows  | ⚠️ best-effort, untested | PowerShell `System.Speech` (default SAPI voice) | `winsound` → closest `%WINDIR%\Media` file, falling back to a system beep |
+| Linux    | ⚠️ best-effort, untested | `spd-say` → `espeak-ng` → `espeak` | `canberra-gtk-play` (freedesktop theme) → `paplay`/`ffplay`/`aplay` of `*.oga` |
 
-> **Windows is implemented but has not been run on a Windows machine.** The named sounds all map to a sensible Windows equivalent, and speech goes through the built-in SAPI engine via PowerShell. If you hit a snag on Windows, please open an issue — the platform layer lives in one file (`plugins/notify/mcp-servers/notify/server.py`) and is easy to tweak.
+> The named sounds (`hero`, `glass`, …) all resolve to a sensible per-platform equivalent. Every backend call is guarded — a missing voice/sound/player returns a descriptive string instead of crashing the server. The whole platform layer is one file: `mcp-server/notify_mcp/server.py`.
 
 ---
 
@@ -73,50 +87,48 @@ Claude calls the MCP tool automatically — e.g. a chime plus *"All tests passed
 
 ```
 .
+├── mcp-server/                         # the shared, uvx-runnable MCP server (one source of truth)
+│   ├── pyproject.toml                  #   entry point: notify-mcp = notify_mcp.server:main
+│   └── notify_mcp/
+│       ├── __init__.py
+│       └── server.py                   #   cross-platform server (notify + play_sound tools)
+│
 ├── .claude-plugin/
-│   └── marketplace.json              # the marketplace catalog
-└── plugins/
-    └── notify/                       # the plugin
-        ├── .claude-plugin/
-        │   └── plugin.json           # plugin manifest
-        ├── .mcp.json                 # registers the bundled MCP server
-        ├── mcp-servers/
-        │   └── notify/
-        │       └── server.py         # cross-platform MCP server (uv PEP-723 script)
-        └── skills/
-            └── notify/
-                └── SKILL.md          # skill definition + instructions
+│   └── marketplace.json                # Claude Code marketplace catalog
+├── plugins/
+│   └── notify/                         # Claude Code plugin
+│       ├── .claude-plugin/plugin.json
+│       ├── .mcp.json                   #   uvx --from git+…#subdirectory=mcp-server  notify-mcp
+│       └── skills/notify/SKILL.md
+│
+├── .agents/
+│   └── plugins/marketplace.json        # Codex marketplace catalog
+└── codex-plugin/
+    └── notify/                         # Codex plugin
+        ├── .codex-plugin/plugin.json
+        ├── .mcp.json                   #   same uvx command (Codex's bare server-map shape)
+        └── skills/notify/
+            ├── SKILL.md
+            └── agents/openai.yaml      #   declares the MCP dep + allow_implicit_invocation
 ```
 
-The plugin registers its MCP server with `${CLAUDE_PLUGIN_ROOT}`, so the bundled `server.py` is found wherever the plugin is installed.
+Both `.mcp.json` files run the **same** path-free command:
+
+```
+uvx --from "git+https://github.com/lucastononro/notify#subdirectory=mcp-server" notify-mcp
+```
 
 ---
 
 ## Develop locally
 
-Test the plugin without publishing:
-
 ```bash
+# Claude Code: load the plugin straight from the repo
 claude --plugin-dir ./plugins/notify
-```
-
-Or test the marketplace end-to-end from a sibling directory:
-
-```
-/plugin marketplace add /absolute/path/to/notify
-/plugin install notify@notify-marketplace
-```
-
-Validate the marketplace + plugin JSON:
-
-```bash
 claude plugin validate .
-```
 
-Boot the MCP server by hand (resolves deps via uv, then waits on stdio — Ctrl-C to exit):
-
-```bash
-uv run --script ./plugins/notify/mcp-servers/notify/server.py
+# Run / build the MCP server from local source (no git fetch)
+uvx --from ./mcp-server notify-mcp
 ```
 
 ---

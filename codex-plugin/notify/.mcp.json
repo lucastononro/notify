@@ -1,0 +1,10 @@
+{
+  "notify": {
+    "command": "uvx",
+    "args": [
+      "--from",
+      "git+https://github.com/lucastononro/notify#subdirectory=mcp-server",
+      "notify-mcp"
+    ]
+  }
+}
