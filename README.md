@@ -29,8 +29,10 @@ Update later: `/plugin marketplace update notify-marketplace`
 
 ```
 codex plugin marketplace add lucastononro/notify
-codex plugin install notify@notify-marketplace
+codex plugin add notify@notify-marketplace
 ```
+
+(The Codex subcommand is `plugin add`, not `install`. Use `codex plugin list` to see it and `codex plugin remove notify` to undo.)
 
 Or wire it up manually (the most reliable path today):
 
