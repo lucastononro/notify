@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "notify": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--script",
+        "${CLAUDE_PLUGIN_ROOT}/mcp-servers/notify/server.py"
+      ]
+    }
+  }
+}

@@ -1,0 +1,280 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["mcp[cli]>=1.2.0"]
+# ///
+"""MCP notify server — speak short beats with pauses, optionally preceded by a sound.
+
+Cross-platform:
+  - macOS  (tested):    `say` for speech, `afplay` for system sounds.
+  - Windows (UNTESTED): PowerShell System.Speech for speech, winsound for sounds.
+
+The two tools (`notify`, `play_sound`) expose the same signatures on every platform;
+the platform layer below picks the right backend. Every backend call is guarded so a
+missing voice/sound never crashes the server — it returns a descriptive string instead.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+from mcp.server.fastmcp import FastMCP
+
+mcp = FastMCP("notify")
+
+if sys.platform == "darwin":
+    PLATFORM = "mac"
+elif sys.platform == "win32" or os.name == "nt":
+    PLATFORM = "win"
+else:
+    PLATFORM = "other"
+
+# --- macOS voice preference (best installed neural voice, falling back) -------------
+VOICE_PRIORITY = [
+    "Ava (Premium)",
+    "Zoe (Premium)",
+    "Evan (Premium)",
+    "Allison (Premium)",
+    "Tom (Premium)",
+    "Samantha (Enhanced)",
+    "Daniel (Enhanced)",
+    "Samantha",
+]
+
+# --- Sound catalog ------------------------------------------------------------------
+# The public sound names are platform-agnostic. Each maps to a macOS system sound and,
+# for portability, to a semantic CATEGORY used to pick a Windows equivalent.
+MAC_SOUNDS = {
+    name.lower(): f"/System/Library/Sounds/{name}.aiff"
+    for name in [
+        "Hero", "Glass", "Sosumi", "Basso", "Funk",
+        "Ping", "Tink", "Submarine", "Pop", "Purr",
+        "Morse", "Frog", "Bottle", "Blow",
+    ]
+}
+
+# sound name -> semantic category (drives the Windows fallback)
+SOUND_CATEGORY = {
+    "hero": "success", "glass": "neutral", "sosumi": "blocked", "basso": "error",
+    "funk": "warning", "ping": "fyi", "tink": "fyi", "submarine": "attention",
+    "pop": "neutral", "purr": "fyi", "morse": "attention", "frog": "neutral",
+    "bottle": "neutral", "blow": "neutral",
+}
+
+VALID_SOUNDS = sorted(SOUND_CATEGORY)
+
+# Windows: candidate %WINDIR%\Media wav files per category (best-effort, names vary by
+# Windows version), and a winsound.MessageBeep flag fallback if none exist.
+WIN_MEDIA = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Media"
+WIN_WAV_CANDIDATES = {
+    "success":   ["tada.wav", "Windows Notify System Generic.wav"],
+    "neutral":   ["Windows Ding.wav", "ding.wav", "chimes.wav"],
+    "fyi":       ["Windows Notify System Generic.wav", "Windows Notify.wav", "chimes.wav"],
+    "attention": ["Windows Notify.wav", "Windows Notify Calendar.wav", "notify.wav"],
+    "warning":   ["Windows Exclamation.wav", "Windows Background.wav"],
+    "blocked":   ["Windows Exclamation.wav", "Windows Foreground.wav"],
+    "error":     ["Windows Critical Stop.wav", "Windows Error.wav", "chord.wav"],
+}
+# winsound.MessageBeep flags (avoid importing winsound off-Windows)
+_MB = {"MB_OK": 0x0, "MB_ICONHAND": 0x10, "MB_ICONEXCLAMATION": 0x30, "MB_ICONASTERISK": 0x40}
+WIN_BEEP_FLAG = {
+    "success": _MB["MB_ICONASTERISK"], "neutral": _MB["MB_OK"], "fyi": _MB["MB_OK"],
+    "attention": _MB["MB_ICONASTERISK"], "warning": _MB["MB_ICONEXCLAMATION"],
+    "blocked": _MB["MB_ICONEXCLAMATION"], "error": _MB["MB_ICONHAND"],
+}
+
+_voice_cache: str | None = None
+
+
+# --- Voice selection ----------------------------------------------------------------
+def pick_voice() -> str:
+    """Return the best available voice name for the current platform (cached)."""
+    global _voice_cache
+    if _voice_cache:
+        return _voice_cache
+
+    if PLATFORM == "mac":
+        try:
+            out = subprocess.run(
+                ["say", "-v", "?"], capture_output=True, text=True
+            ).stdout
+            for v in VOICE_PRIORITY:
+                esc = re.escape(v)
+                if re.search(rf"^{esc}\s+[a-z]{{2}}_[A-Z]{{2}}", out, re.MULTILINE):
+                    _voice_cache = v
+                    return v
+        except Exception:
+            pass
+        _voice_cache = "Samantha"
+        return _voice_cache
+
+    if PLATFORM == "win":
+        try:
+            out = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                 "Add-Type -AssemblyName System.Speech; "
+                 "(New-Object System.Speech.Synthesis.SpeechSynthesizer).Voice.Name"],
+                capture_output=True, text=True,
+            ).stdout.strip()
+            _voice_cache = out or "default (SAPI)"
+            return _voice_cache
+        except Exception:
+            _voice_cache = "default (SAPI)"
+            return _voice_cache
+
+    _voice_cache = "default"
+    return _voice_cache
+
+
+# --- Sound playback -----------------------------------------------------------------
+def _play(sound: str) -> bool:
+    """Play a system sound by name. Returns True if something was played."""
+    name = sound.lower()
+    if name not in SOUND_CATEGORY:
+        return False
+
+    if PLATFORM == "mac":
+        path = MAC_SOUNDS.get(name)
+        if path and Path(path).exists():
+            subprocess.run(["afplay", path], check=False)
+            return True
+        return False
+
+    if PLATFORM == "win":
+        category = SOUND_CATEGORY[name]
+        try:
+            import winsound  # Windows-only stdlib module
+        except Exception:
+            return False
+        # Prefer a real media wav for the category; fall back to a system beep.
+        for fname in WIN_WAV_CANDIDATES.get(category, []):
+            wav = WIN_MEDIA / fname
+            if wav.exists():
+                try:
+                    winsound.PlaySound(str(wav), winsound.SND_FILENAME)
+                    return True
+                except Exception:
+                    break
+        try:
+            winsound.MessageBeep(WIN_BEEP_FLAG.get(category, _MB["MB_OK"]))
+            return True
+        except Exception:
+            return False
+
+    return False
+
+
+# --- Speech -------------------------------------------------------------------------
+def _speak(voice: str, text: str) -> None:
+    """Speak text using the platform TTS backend. Best-effort, never raises."""
+    if PLATFORM == "mac":
+        subprocess.run(["say", "-v", voice, text], check=False)
+        return
+
+    if PLATFORM == "win":
+        # Pass the text through an env var so PowerShell never has to quote/escape it.
+        env = {**os.environ, "NOTIFY_TEXT": text}
+        script = (
+            "Add-Type -AssemblyName System.Speech; "
+            "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+            "$s.Speak($env:NOTIFY_TEXT)"
+        )
+        try:
+            subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+                env=env, check=False,
+            )
+        except Exception:
+            pass
+        return
+    # PLATFORM == "other": no TTS backend; silently skip (caller still returns a summary).
+
+
+@mcp.tool()
+def notify(
+    beats: list[dict],
+    sound: str | None = None,
+) -> str:
+    """Speak a sequence of short status beats with pauses between them.
+
+    Use this to get the user's attention when they may be away from the screen:
+    finishing a long task, hitting a blocker, asking a question, or whenever
+    they asked to be pinged/notified.
+
+    Each beat is spoken using a high-quality local voice (macOS picks Ava Premium
+    if installed, falling back through Premium/Enhanced/legacy voices; Windows uses
+    the default SAPI voice). 100% local, free, offline.
+
+    Speech-friendly rules — the model MUST follow these when composing beats:
+    - Plain English sentences only. No tables, bullets, markdown, code, file
+      paths, URLs, long numbers, version strings, or punctuation-heavy text.
+    - Each beat should be short and natural — read it out loud mentally first.
+      Typical beat: one sentence, ~5–20 words. Length follows content.
+    - Split into multiple beats when content has distinct parts (e.g. headline
+      + detail, or phase one + phase two). 1–3 beats is normal; more than 3
+      means rewrite shorter.
+
+    Args:
+        beats: List of beat dicts. Each must have "text" (str) and may have
+            "pause_after" (float seconds, default 0.3) — pause inserted AFTER
+            this beat finishes speaking, before the next begins.
+            Example: [
+                {"text": "Build done.", "pause_after": 0.4},
+                {"text": "All tests passed."}
+            ]
+        sound: Optional name of a system sound to play BEFORE the first beat.
+            Choose based on situation:
+              - "hero": triumphant — task completed successfully
+              - "glass": neutral chime — generic "I'm done"
+              - "sosumi": sharp — "I'm blocked, need input"
+              - "basso" / "funk": warning/error — something failed
+              - "ping" / "tink": gentle — low-urgency FYI
+              - "submarine": distinctive, hard to miss
+            Other valid names: pop, purr, morse, frog, bottle, blow.
+
+    Returns:
+        Confirmation string with voice used and beat count.
+    """
+    if sound:
+        _play(sound)
+
+    voice = pick_voice()
+    spoken = 0
+    for beat in beats:
+        text = (beat.get("text") or "").strip()
+        if not text:
+            continue
+        _speak(voice, text)
+        spoken += 1
+        pause = beat.get("pause_after", 0.3)
+        if pause and pause > 0:
+            time.sleep(min(float(pause), 5.0))
+
+    return f"Played {spoken} beat(s) with voice '{voice}' on {PLATFORM}"
+
+
+@mcp.tool()
+def play_sound(sound: str = "glass") -> str:
+    """Play a system sound without speaking. Use for fast attention pings.
+
+    Args:
+        sound: Sound name — hero, glass, sosumi, basso, funk, ping, tink,
+            submarine, pop, purr, morse, frog, bottle, blow.
+
+    Returns:
+        Confirmation string.
+    """
+    if sound.lower() not in SOUND_CATEGORY:
+        return f"Unknown sound '{sound}'. Valid: {', '.join(VALID_SOUNDS)}"
+    if _play(sound):
+        return f"Played sound '{sound}' on {PLATFORM}"
+    return f"Could not play sound '{sound}' on {PLATFORM} (no audio backend available)"
+
+
+if __name__ == "__main__":
+    mcp.run()

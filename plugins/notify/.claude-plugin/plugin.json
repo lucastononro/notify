@@ -1,0 +1,21 @@
+{
+  "name": "notify",
+  "description": "Plays a sound and/or speaks a short, speech-friendly status update to get your attention when a long task finishes, hits a blocker, or needs a decision. Local, free, offline. Ships a bundled MCP server with two tools: notify (sound + spoken beats) and play_sound (sound only).",
+  "version": "0.1.0",
+  "author": {
+    "name": "Lucas Tonon",
+    "email": "ltononro@gmail.com"
+  },
+  "homepage": "https://github.com/lucastononro/notify",
+  "repository": "https://github.com/lucastononro/notify",
+  "license": "MIT",
+  "keywords": [
+    "notify",
+    "tts",
+    "text-to-speech",
+    "sound",
+    "voice",
+    "attention",
+    "mcp"
+  ]
+}

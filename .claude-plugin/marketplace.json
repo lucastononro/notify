@@ -1,0 +1,21 @@
+{
+  "name": "notify-marketplace",
+  "owner": {
+    "name": "Lucas Tonon",
+    "email": "ltononro@gmail.com"
+  },
+  "metadata": {
+    "description": "Marketplace for notify — a 100% local, free, offline attention skill for Claude Code that plays a sound and speaks a short spoken status update when you're away from the screen."
+  },
+  "plugins": [
+    {
+      "name": "notify",
+      "source": "./plugins/notify",
+      "description": "Plays a sound and/or speaks a short, speech-friendly status update to get your attention when a long task finishes, hits a blocker, or needs a decision. Local, free, offline. Ships a bundled MCP server.",
+      "category": "productivity",
+      "keywords": ["notify", "tts", "text-to-speech", "sound", "voice", "attention", "mcp"],
+      "homepage": "https://github.com/lucastononro/notify",
+      "license": "MIT"
+    }
+  ]
+}
