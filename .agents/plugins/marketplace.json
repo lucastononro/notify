@@ -1,0 +1,21 @@
+{
+  "name": "notify-marketplace",
+  "owner": {
+    "name": "Lucas Tonon",
+    "email": "ltononro@gmail.com"
+  },
+  "metadata": {
+    "description": "Marketplace for notify — a 100% local, free, offline attention plugin for Codex that plays a sound and speaks a short status update when you're away from the screen."
+  },
+  "plugins": [
+    {
+      "name": "notify",
+      "source": { "path": "./codex-plugin/notify" },
+      "description": "Plays a sound and/or speaks a short, speech-friendly status update to get your attention when a long task finishes, blocks, or needs a decision. Ships a path-free uvx MCP server.",
+      "category": "Productivity",
+      "keywords": ["notify", "tts", "text-to-speech", "sound", "voice", "attention", "mcp"],
+      "homepage": "https://github.com/lucastononro/notify",
+      "license": "MIT"
+    }
+  ]
+}

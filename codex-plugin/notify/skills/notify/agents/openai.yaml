@@ -1,0 +1,18 @@
+interface:
+  display_name: "Notify"
+  short_description: "Local sound + spoken status updates to grab your attention."
+
+# Let the skill fire automatically when the user asks to be pinged/notified or a long
+# task finishes — matching how Claude Code triggers it from the description. Set to
+# false if you'd rather invoke it only explicitly via `$notify`.
+policy:
+  allow_implicit_invocation: true
+
+# This skill depends on the bundled stdio MCP server named "notify", whose command is
+# declared in the plugin's ./.mcp.json (uvx-runnable, path-free). The server exposes the
+# `notify` and `play_sound` tools.
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "notify"
+      description: "Local notify MCP server — plays a sound and speaks short status beats."

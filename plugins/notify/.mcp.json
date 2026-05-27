@@ -1,11 +1,11 @@
 {
   "mcpServers": {
     "notify": {
-      "command": "uv",
+      "command": "uvx",
       "args": [
-        "run",
-        "--script",
-        "${CLAUDE_PLUGIN_ROOT}/mcp-servers/notify/server.py"
+        "--from",
+        "git+https://github.com/lucastononro/notify#subdirectory=mcp-server",
+        "notify-mcp"
       ]
     }
   }
