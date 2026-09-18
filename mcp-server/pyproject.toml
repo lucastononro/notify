@@ -7,7 +7,7 @@ requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Lucas Tonon", email = "ltononro@gmail.com" }]
 keywords = ["notify", "tts", "text-to-speech", "sound", "voice", "attention", "mcp"]
-dependencies = ["mcp[cli]>=1.2.0"]
+dependencies = ["mcp[cli]>=1.2.0,<2"]
 
 [project.urls]
 Homepage = "https://github.com/lucastononro/notify"
