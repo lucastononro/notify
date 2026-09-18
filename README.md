@@ -72,7 +72,7 @@ The agent calls the MCP tool automatically — e.g. a chime plus *"All tests pas
 
 | Platform | Status | Speech | Sound |
 | -------- | ------ | ------ | ----- |
-| macOS    | ✅ tested | `say` (auto-picks best neural voice — Ava Premium → … → Samantha) | `afplay` of `/System/Library/Sounds/*.aiff` |
+| macOS    | ✅ tested | `say` (round robin per server session: Enhanced/Premium voices if available, otherwise standard voices) | `afplay` of `/System/Library/Sounds/*.aiff` |
 | Windows  | ⚠️ best-effort, untested | PowerShell `System.Speech` (default SAPI voice) | `winsound` → closest `%WINDIR%\Media` file, falling back to a system beep |
 | Linux    | ⚠️ best-effort, untested | `spd-say` → `espeak-ng` → `espeak` | `canberra-gtk-play` (freedesktop theme) → `paplay`/`ffplay`/`aplay` of `*.oga` |
 

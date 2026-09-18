@@ -9,6 +9,35 @@ Exposes two stdio MCP tools — `notify` (play a sound, then speak short "beats"
 - **Windows** (best-effort, untested): PowerShell `System.Speech` + `winsound`.
 - **Linux** (best-effort, untested): `spd-say`/`espeak` + `canberra-gtk-play`/`paplay`.
 
+## macOS voice rotation
+
+Each Notify server session selects the next eligible voice on its first `notify`
+call, then keeps that voice until the server process exits. Calls to `play_sound`
+do not consume a turn in the rotation. Restarting Codex can start a new server
+session even for an existing task; this is not a permanent voice assignment to a
+task ID.
+
+The pool contains all installed voices labelled `(Enhanced)` or `(Premium)` if
+any exist. Otherwise it contains all installed standard voices. Voices cycle in
+alphabetical order, wrapping after the last one. The installed pool is refreshed
+for each new server session.
+
+The last selected voice is stored in
+`~/Library/Application Support/notify/voice-rotation.sqlite3`. SQLite transactions
+serialize concurrent sessions so they each advance the rotation once. Set
+`NOTIFY_VOICE_STATE_FILE` to use a different state file, for example during tests.
+If state storage is unavailable, the session uses the first eligible voice and
+logs a warning to stderr. If voice enumeration fails, it falls back to Samantha.
+
+This local checkout can be selected in Codex with:
+
+```bash
+codex mcp add notify -- uvx --from /absolute/path/to/notify/mcp-server notify-mcp
+```
+
+Existing running servers retain their voice and code until restarted. The MCP
+dependency is constrained to version 1 because this server uses its FastMCP API.
+
 ## Run
 
 Path-free, via `uvx` straight from git:

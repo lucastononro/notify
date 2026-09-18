@@ -16,9 +16,13 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
+import threading
 import time
+from bisect import bisect_right
+from contextlib import closing
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -33,18 +37,6 @@ elif sys.platform.startswith("linux"):
     PLATFORM = "linux"
 else:
     PLATFORM = "other"
-
-# --- macOS voice preference (best installed neural voice, falling back) -------------
-VOICE_PRIORITY = [
-    "Ava (Premium)",
-    "Zoe (Premium)",
-    "Evan (Premium)",
-    "Allison (Premium)",
-    "Tom (Premium)",
-    "Samantha (Enhanced)",
-    "Daniel (Enhanced)",
-    "Samantha",
-]
 
 # --- Sound catalog ------------------------------------------------------------------
 # The public sound names are platform-agnostic. Each maps to a macOS system sound and,
@@ -100,29 +92,64 @@ LINUX_OGA_DIRS = [
 ]
 
 _voice_cache: str | None = None
+_voice_lock = threading.Lock()
 
 
 # --- Voice selection ----------------------------------------------------------------
+def eligible_mac_voices(listing: str) -> list[str]:
+    """Prefer the Enhanced/Premium pool; otherwise use all installed voices."""
+    voices = sorted(set(re.findall(
+        r"^(.+?)\s+[a-z]{2,3}_[A-Z]{2}\s+#", listing, re.MULTILINE
+    )), key=str.casefold)
+    upgraded = [v for v in voices if v.endswith(("(Enhanced)", "(Premium)"))]
+    return upgraded or voices
+
+
+def next_mac_voice(voices: list[str]) -> str:
+    """Advance the shared round robin atomically across server processes."""
+    state_path = Path(os.environ.get(
+        "NOTIFY_VOICE_STATE_FILE",
+        str(Path.home() / "Library/Application Support/notify/voice-rotation.sqlite3"),
+    )).expanduser()
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(state_path, timeout=10)) as db, db:
+        db.execute("BEGIN IMMEDIATE")
+        db.execute("CREATE TABLE IF NOT EXISTS rotation (id INTEGER PRIMARY KEY, voice TEXT NOT NULL)")
+        previous = db.execute("SELECT voice FROM rotation WHERE id = 1").fetchone()
+        # Remember a name rather than an index so adding/removing voices is safe.
+        index = bisect_right([v.casefold() for v in voices], previous[0].casefold()) if previous else 0
+        voice = voices[index % len(voices)]
+        db.execute("INSERT OR REPLACE INTO rotation (id, voice) VALUES (1, ?)", (voice,))
+    return voice
+
+
 def pick_voice() -> str:
-    """Return the best available voice name for the current platform (cached)."""
+    """Choose once on the first notify call and keep it for this server session."""
     global _voice_cache
-    if _voice_cache:
+    with _voice_lock:
+        if _voice_cache is None:
+            _voice_cache = _select_voice()
         return _voice_cache
 
+
+def _select_voice() -> str:
     if PLATFORM == "mac":
         try:
             out = subprocess.run(
-                ["say", "-v", "?"], capture_output=True, text=True
+                ["say", "-v", "?"], capture_output=True, text=True, check=True
             ).stdout
-            for v in VOICE_PRIORITY:
-                esc = re.escape(v)
-                if re.search(rf"^{esc}\s+[a-z]{{2}}_[A-Z]{{2}}", out, re.MULTILINE):
-                    _voice_cache = v
-                    return v
-        except Exception:
-            pass
-        _voice_cache = "Samantha"
-        return _voice_cache
+        except (OSError, subprocess.SubprocessError) as exc:
+            print(f"notify: could not list voices: {exc}", file=sys.stderr)
+            return "Samantha"
+        voices = eligible_mac_voices(out)
+        if not voices:
+            return "Samantha"
+        try:
+            return next_mac_voice(voices)
+        except (OSError, sqlite3.Error) as exc:
+            # Keep notifications working and stay within the eligible pool.
+            print(f"notify: voice rotation unavailable: {exc}", file=sys.stderr)
+            return voices[0]
 
     if PLATFORM == "win":
         try:
@@ -132,14 +159,11 @@ def pick_voice() -> str:
                  "(New-Object System.Speech.Synthesis.SpeechSynthesizer).Voice.Name"],
                 capture_output=True, text=True,
             ).stdout.strip()
-            _voice_cache = out or "default (SAPI)"
-            return _voice_cache
+            return out or "default (SAPI)"
         except Exception:
-            _voice_cache = "default (SAPI)"
-            return _voice_cache
+            return "default (SAPI)"
 
-    _voice_cache = "default"
-    return _voice_cache
+    return "default"
 
 
 # --- Sound playback -----------------------------------------------------------------
@@ -248,9 +272,10 @@ def notify(
     finishing a long task, hitting a blocker, asking a question, or whenever
     they asked to be pinged/notified.
 
-    Each beat is spoken using a high-quality local voice (macOS picks Ava Premium
-    if installed, falling back through Premium/Enhanced/legacy voices; Windows uses
-    the default SAPI voice; Linux uses spd-say/espeak). 100% local, free, offline.
+    On macOS, each server session takes the next installed Enhanced/Premium voice
+    in a shared round robin, or the next standard voice if none are installed.
+    The voice stays fixed for that server session. Windows uses the default SAPI
+    voice; Linux uses spd-say/espeak. 100% local, free, offline.
 
     Speech-friendly rules — the model MUST follow these when composing beats:
     - Plain English sentences only. No tables, bullets, markdown, code, file
