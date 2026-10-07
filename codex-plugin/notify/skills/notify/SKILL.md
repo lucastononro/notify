@@ -12,10 +12,26 @@ Get the user's attention with a sound — and optionally a short, informative sp
 ## Tools (from the bundled `notify` MCP server)
 
 - **`notify`** — play a sound (optional), then speak a sequence of short beats with pauses.
-  - Input: `beats` (list of `{text: str, pause_after?: float}`), `sound` (optional: `hero`, `glass`, `sosumi`, `basso`, `funk`, `ping`, `tink`, `submarine`, `pop`, `purr`, `morse`, `frog`, `bottle`, `blow`).
+  - Input: `beats` (list of `{text: str, pause_after?: float}`), `voice` (optional installed voice name, such as `Samantha` on macOS), `sound` (optional: `hero`, `glass`, `sosumi`, `basso`, `funk`, `ping`, `tink`, `submarine`, `pop`, `purr`, `morse`, `frog`, `bottle`, `blow`).
 - **`play_sound`** — play a system sound without speaking. Input: `sound` (one of the names above).
 
 Always prefer these tools over shelling out — they handle voice selection, escaping, pacing, and the macOS/Windows/Linux platform difference automatically.
+
+## Voice selection
+
+Default to English speech and an English voice unless the user explicitly requests another language or voice.
+
+- Honor the user's configured voice preference. On macOS, pass `voice: "Samantha"` for routine English notifications when no preference is known. `Daniel` is another English option. Use the exact installed name from `say -v '?'` when selecting another voice, including any `(Enhanced)` or `(Premium)` suffix.
+- On Windows and Linux, omit `voice` to use the server's English default. Named voices are platform-specific, so do not pass macOS voice names to another platform.
+- The optional `voice` argument overrides the server's `NOTIFY_VOICE` environment setting. Without either, macOS rotates English voices once per server session, preferring Enhanced/Premium voices. Windows selects an installed English SAPI voice; Linux requests English from its speech backend.
+- If the MCP tools are unavailable and you use the OS speech command, select the voice explicitly. On macOS use `say -v Samantha`; on Linux use `espeak-ng -v en` or `spd-say -l en`. Do not rely on the user's system language or default voice.
+- If a named voice is unavailable, choose another installed English voice and retry once. Use a sound-only notification if speech remains unavailable.
+
+Example macOS tool input:
+
+```json
+{"beats": [{"text": "The tests passed. The branch is ready for review."}], "sound": "hero", "voice": "Samantha"}
+```
 
 ## When to use this
 
@@ -30,7 +46,7 @@ Do NOT trigger for every response — only when there's a meaningful reason to i
 
 There is no hard length cap — speech is free and local. But the message still has to sound like *spoken English*, not narrated documentation. Aim for one or two sentences (~10–30 words).
 
-Speech-friendly = plain English, full sentences, concrete facts, conversational phrasing.
+Speech-friendly = plain English by default, full sentences, concrete facts, conversational phrasing. Use another language only when the user requests it.
 
 NOT speech-friendly — strip these before speaking:
 

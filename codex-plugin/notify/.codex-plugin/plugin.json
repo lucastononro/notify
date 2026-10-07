@@ -1,6 +1,6 @@
 {
   "name": "notify",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Plays a sound and/or speaks a short, speech-friendly status update to get your attention when a long task finishes, blocks, or needs a decision. Local, free, offline.",
   "author": { "name": "Lucas Tonon", "email": "ltononro@gmail.com" },
   "homepage": "https://github.com/lucastononro/notify",

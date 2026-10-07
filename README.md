@@ -68,13 +68,37 @@ The agent calls the MCP tool automatically — e.g. a chime plus *"All tests pas
 
 ---
 
+### Choose a voice
+
+English speech and English voices are the default. On macOS, the skill selects `Samantha` for routine notifications, with `Daniel` as another English option. The server retains voice rotation when no voice is specified, restricted to English voices and preferring installed Enhanced/Premium voices.
+
+Pass the optional `voice` argument to choose an installed voice for one notification:
+
+```json
+{"beats": [{"text": "The tests passed."}], "sound": "hero", "voice": "Samantha"}
+```
+
+To keep a specific voice across notifications, set `NOTIFY_VOICE` in the MCP server's environment. A tool-call `voice` takes precedence over `NOTIFY_VOICE`, which takes precedence over the English default. Voice overrides do not advance or replace the macOS session's rotation choice.
+
+Voice names depend on the platform. List macOS voices with `say -v '?'` and use the exact name, including any quality suffix. Windows uses installed SAPI names; Linux uses the selected backend's voice names or identifiers. An unavailable named macOS or Windows voice returns an error instead of silently switching voices. Windows without an installed English voice also returns an error. Install an English voice or explicitly select another language.
+
+After updating the plugin, restart the agent's session. If `uvx` still runs cached server code, refresh it once:
+
+```bash
+uvx --refresh-package notify-mcp-server --from "git+https://github.com/lucastononro/notify#subdirectory=mcp-server" notify-mcp
+```
+
+Stop this standalone server after it starts, then launch the agent normally. Refreshing the package requires network access; notifications use local speech and sound.
+
+---
+
 ## Platform support
 
 | Platform | Status | Speech | Sound |
 | -------- | ------ | ------ | ----- |
-| macOS    | ✅ tested | `say` (round robin per server session: Enhanced/Premium voices if available, otherwise standard voices) | `afplay` of `/System/Library/Sounds/*.aiff` |
-| Windows  | ⚠️ best-effort, untested | PowerShell `System.Speech` (default SAPI voice) | `winsound` → closest `%WINDIR%\Media` file, falling back to a system beep |
-| Linux    | ⚠️ best-effort, untested | `spd-say` → `espeak-ng` → `espeak` | `canberra-gtk-play` (freedesktop theme) → `paplay`/`ffplay`/`aplay` of `*.oga` |
+| macOS    | ✅ tested | `say` (English round robin per server session: English Enhanced/Premium voices first, otherwise standard English voices; optional named voice override) | `afplay` of `/System/Library/Sounds/*.aiff` |
+| Windows  | ⚠️ best-effort, untested | PowerShell `System.Speech` (installed English SAPI voice by default; optional named voice override) | `winsound` → closest `%WINDIR%\Media` file, falling back to a system beep |
+| Linux    | ⚠️ best-effort, untested | `spd-say` → `espeak-ng` → `espeak`, explicitly requesting English by default | `canberra-gtk-play` (freedesktop theme) → `paplay`/`ffplay`/`aplay` of `*.oga` |
 
 > The named sounds (`hero`, `glass`, …) all resolve to a sensible per-platform equivalent. Every backend call is guarded — a missing voice/sound/player returns a descriptive string instead of crashing the server. The whole platform layer is one file: `mcp-server/notify_mcp/server.py`.
 
