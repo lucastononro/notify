@@ -15,7 +15,7 @@ Get the user's attention with a sound — and optionally a short, informative sp
 A local MCP server named `notify` exposes two tools:
 
 - **`mcp__notify__notify`** — speak a sequence of short beats with pauses; optionally play a sound first.
-  - Input: `beats` (list of `{text: str, pause_after?: float}`), `sound` (optional, e.g. `"hero"`, `"glass"`, `"sosumi"`, `"basso"`).
+  - Input: `beats` (list of `{text: str, pause_after?: float}`), `voice` (optional installed voice name, such as `"Samantha"`), `sound` (optional, e.g. `"hero"`, `"glass"`, `"sosumi"`, `"basso"`).
   - Behavior: plays sound (if any), then speaks each beat with the configured pause between them.
 - **`mcp__notify__play_sound`** — play a system sound without speaking. Used for fast attention pings.
   - Input: `sound` (one of `hero`, `glass`, `sosumi`, `basso`, `funk`, `ping`, `tink`, `submarine`, `pop`, `purr`, `morse`, `frog`, `bottle`, `blow`).
@@ -26,11 +26,27 @@ A local MCP server named `notify` exposes two tools:
 
 ## Platforms
 
-- **macOS** — tested. Speech via `say` (auto-picks the best installed neural voice: Ava Premium, falling back through Premium/Enhanced/legacy). Sounds from `/System/Library/Sounds`.
-- **Windows** — supported but **untested**. The MCP server speaks via PowerShell `System.Speech` (default SAPI voice) and plays sounds via the stdlib `winsound` module, mapping each sound name to the closest `%WINDIR%\Media` file or a system beep. The named sounds (`hero`, `glass`, …) all resolve to a sensible Windows equivalent.
-- Either way, **just call `mcp__notify__notify`** — the server resolves the backend. Sound and voice names stay the same across platforms.
+- **macOS** — tested. Speech via `say` with an explicit installed voice, defaulting to English. Without an override, the server rotates English Enhanced/Premium voices or standard English voices. Sounds from `/System/Library/Sounds`.
+- **Windows** — supported but **untested**. The MCP server speaks via PowerShell `System.Speech` (installed English SAPI voice by default) and plays sounds via the stdlib `winsound` module, mapping each sound name to the closest `%WINDIR%\Media` file or a system beep. The named sounds (`hero`, `glass`, …) all resolve to a sensible Windows equivalent.
+- Either way, **just call `mcp__notify__notify`** — the server resolves the backend. Sound names stay the same across platforms; voice names depend on the installed speech backend.
 
 ---
+
+## Voice selection
+
+Default to English speech and an English voice unless the user explicitly requests another language or voice.
+
+- Honor the user's configured voice preference. On macOS, pass `voice: "Samantha"` for routine English notifications when no preference is known. `Daniel` is another English option. Use the exact installed name from `say -v '?'` when selecting another voice, including any `(Enhanced)` or `(Premium)` suffix.
+- On Windows and Linux, omit `voice` to use the server's English default. Named voices are platform-specific, so do not pass macOS voice names to another platform.
+- The optional `voice` argument overrides the server's `NOTIFY_VOICE` environment setting. Without either, macOS rotates English voices once per server session, preferring Enhanced/Premium voices. Windows selects an installed English SAPI voice; Linux requests English from its speech backend.
+- If the MCP tools are unavailable and you use the OS speech command, select the voice explicitly. On macOS use `say -v Samantha`; on Linux use `espeak-ng -v en` or `spd-say -l en`. Do not rely on the user's system language or default voice.
+- If a named voice is unavailable, choose another installed English voice and retry once. Use a sound-only notification if speech remains unavailable.
+
+Example macOS tool input:
+
+```json
+{"beats": [{"text": "The tests passed. The branch is ready for review."}], "sound": "hero", "voice": "Samantha"}
+```
 
 ## When to use this
 
@@ -53,7 +69,7 @@ Rough target: **one or two sentences per message** (~10–30 words). Longer is f
 
 ### Speech-friendly = these things only
 
-✅ Plain English, full sentences, natural sentence flow.
+✅ Plain English by default, full sentences, natural sentence flow. Use another language only when the user requests it.
 ✅ Concrete facts the user actually needs to know.
 ✅ Conversational phrasing — write like you're telling them in person.
 
@@ -108,6 +124,7 @@ Call it like this (preferred path):
 mcp__notify__notify(
   beats=[{"text": "All tests passed."}, {"text": "The branch is ready for review."}],
   sound="hero",
+  voice="Samantha",  # macOS; omit on other platforms for their English default
 )
 ```
 
@@ -122,19 +139,20 @@ tool — there's no portable one-liner.)
 # Sound only
 afplay /System/Library/Sounds/Glass.aiff
 
-# Sound + spoken status with the best installed voice
+# Sound + spoken status with an explicit English voice
 afplay /System/Library/Sounds/Hero.aiff && \
-VOICE=$(for v in "Ava (Premium)" "Zoe (Premium)" "Evan (Premium)" "Allison (Premium)" "Tom (Premium)" "Samantha (Enhanced)" "Daniel (Enhanced)" "Samantha"; do
-  esc=$(echo "$v" | sed 's/[][()]/\\&/g')
-  if say -v '?' 2>/dev/null | grep -qE "^${esc} +[a-z]{2}_[A-Z]{2}"; then echo "$v"; break; fi
-done) && \
-say -v "$VOICE" "All tests passed. The branch is ready for review."
+say -v Samantha "All tests passed. The branch is ready for review."
 ```
 
-Windows fallback (one line, default voice):
+On Windows, use the MCP tool so it selects an installed English SAPI voice. If you need a PowerShell fallback, select an enabled English voice explicitly:
 
 ```powershell
-powershell -NoProfile -Command "Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('All tests passed.')"
+Add-Type -AssemblyName System.Speech
+$s = New-Object System.Speech.Synthesis.SpeechSynthesizer
+$v = $s.GetInstalledVoices() | Where-Object { $_.Enabled -and $_.VoiceInfo.Culture.TwoLetterISOLanguageName -eq 'en' } | Select-Object -First 1
+if (-not $v) { throw 'No installed English voice' }
+$s.SelectVoice($v.VoiceInfo.Name)
+$s.Speak('All tests passed.')
 ```
 
 ---

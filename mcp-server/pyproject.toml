@@ -1,6 +1,6 @@
 [project]
 name = "notify-mcp-server"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local, free, offline MCP server that plays a sound and speaks a short status update. macOS / Windows / Linux."
 readme = "README.md"
 requires-python = ">=3.11"

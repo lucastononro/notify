@@ -41,9 +41,24 @@ class VoiceRotationTests(unittest.TestCase):
         listing = "Samantha    en_US    # Hello.\n" + LISTING + "\n" + LISTING
         self.assertEqual(server.eligible_mac_voices(listing), VOICES)
 
-    def test_no_upgraded_voices_uses_all_standard_voices(self):
+    def test_no_upgraded_voices_uses_only_english_standard_voices(self):
         listing = "Samantha    en_US    # Hello.\nAmélie    fr_CA    # Bonjour.\n"
-        self.assertEqual(server.eligible_mac_voices(listing), ["Amélie", "Samantha"])
+        self.assertEqual(server.eligible_mac_voices(listing), ["Samantha"])
+
+    def test_foreign_premium_voice_does_not_displace_english_standard_voice(self):
+        listing = "Luciana (Premium)    pt_BR    # Olá.\nSamantha    en_US    # Hello.\n"
+        self.assertEqual(server.eligible_mac_voices(listing), ["Samantha"])
+
+    def test_english_variants_are_eligible_but_foreign_upgraded_voices_are_not(self):
+        listing = LISTING + "\nAmélie (Premium)    fr_CA    # Bonjour.\nDaniel    en_GB    # Hello.\n"
+        self.assertEqual(server.eligible_mac_voices(listing), VOICES)
+
+    def test_no_english_voice_never_falls_back_to_foreign_voice(self):
+        listing = "Luciana (Premium)    pt_BR    # Olá.\n"
+        self.assertEqual(server.eligible_mac_voices(listing), [])
+        with patch.object(server.subprocess, "run", return_value=SimpleNamespace(stdout=listing)):
+            self.assertEqual(server.pick_voice(), "Samantha")
+        self.assertFalse(self.state.exists())
 
     def test_successive_sessions_wrap_and_keep_their_voice(self):
         with patch.object(server.subprocess, "run", return_value=SimpleNamespace(stdout=LISTING)):

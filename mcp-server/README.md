@@ -49,6 +49,12 @@ uvx --from "git+https://github.com/lucastononro/notify#subdirectory=mcp-server" 
 The same command goes in a Claude Code `.mcp.json` or a Codex `config.toml` /
 `.mcp.json` — see the [repo README](https://github.com/lucastononro/notify).
 
+## Voices
+
+`notify(beats, sound=None, voice=None)` defaults to English. On macOS the default rotates through English Enhanced/Premium voices, falling back to standard English voices. A per-call `voice` selects an exact installed name, such as `Samantha` or `Daniel`. Set `NOTIFY_VOICE` in the server environment for a persistent preference. The per-call argument takes precedence and bypasses rotation without changing its state.
+
+Windows selects an enabled English SAPI voice by default and explicitly uses the selected name for speech. Linux passes English language/voice arguments to `spd-say` or `espeak`. Overrides use names supported by the platform's speech backend. Missing named macOS or Windows voices return a selection error; Windows never falls back to a non-English OS default.
+
 ## Develop
 
 ```bash

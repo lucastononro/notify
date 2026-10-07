@@ -96,11 +96,20 @@ _voice_lock = threading.Lock()
 
 
 # --- Voice selection ----------------------------------------------------------------
+def installed_mac_voices(listing: str) -> dict[str, str]:
+    """Map installed voice names to their language/region identifiers."""
+    return dict(re.findall(
+        r"^(.+?)\s+([a-z]{2,3}_[A-Z]{2})\s+#", listing, re.MULTILINE
+    ))
+
+
 def eligible_mac_voices(listing: str) -> list[str]:
-    """Prefer the Enhanced/Premium pool; otherwise use all installed voices."""
-    voices = sorted(set(re.findall(
-        r"^(.+?)\s+[a-z]{2,3}_[A-Z]{2}\s+#", listing, re.MULTILINE
-    )), key=str.casefold)
+    """Prefer English Enhanced/Premium voices, then standard English voices."""
+    voices = sorted(
+        (name for name, locale in installed_mac_voices(listing).items()
+         if locale.startswith("en_")),
+        key=str.casefold,
+    )
     upgraded = [v for v in voices if v.endswith(("(Enhanced)", "(Premium)"))]
     return upgraded or voices
 
@@ -123,8 +132,11 @@ def next_mac_voice(voices: list[str]) -> str:
     return voice
 
 
-def pick_voice() -> str:
-    """Choose once on the first notify call and keep it for this server session."""
+def pick_voice(voice: str | None = None) -> str:
+    """Honor a named voice; otherwise cache the English session default."""
+    preferred = (voice or "").strip() or os.environ.get("NOTIFY_VOICE", "").strip()
+    if preferred:
+        return _select_voice(preferred)
     global _voice_cache
     with _voice_lock:
         if _voice_cache is None:
@@ -132,15 +144,21 @@ def pick_voice() -> str:
         return _voice_cache
 
 
-def _select_voice() -> str:
+def _select_voice(preferred: str | None = None) -> str:
     if PLATFORM == "mac":
         try:
             out = subprocess.run(
                 ["say", "-v", "?"], capture_output=True, text=True, check=True
             ).stdout
         except (OSError, subprocess.SubprocessError) as exc:
+            if preferred:
+                raise ValueError(f"could not verify installed voice '{preferred}'") from exc
             print(f"notify: could not list voices: {exc}", file=sys.stderr)
             return "Samantha"
+        if preferred:
+            if preferred not in installed_mac_voices(out):
+                raise ValueError(f"voice '{preferred}' is not installed; list voices with say -v '?'")
+            return preferred
         voices = eligible_mac_voices(out)
         if not voices:
             return "Samantha"
@@ -152,18 +170,31 @@ def _select_voice() -> str:
             return voices[0]
 
     if PLATFORM == "win":
+        script = (
+            "Add-Type -AssemblyName System.Speech; "
+            "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+            "$voices = $s.GetInstalledVoices() | Where-Object { $_.Enabled } | "
+            "ForEach-Object { $_.VoiceInfo }; "
+            "if ($env:NOTIFY_VOICE) { "
+            "$v = $voices | Where-Object { $_.Name -eq $env:NOTIFY_VOICE } "
+            "} else { "
+            "$v = $voices | Where-Object { $_.Culture.TwoLetterISOLanguageName -eq 'en' } "
+            "}; $v = $v | Select-Object -First 1; "
+            "if (-not $v) { Write-Error 'No matching installed voice'; exit 1 }; $v.Name"
+        )
         try:
             out = subprocess.run(
-                ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-                 "Add-Type -AssemblyName System.Speech; "
-                 "(New-Object System.Speech.Synthesis.SpeechSynthesizer).Voice.Name"],
-                capture_output=True, text=True,
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+                env={**os.environ, "NOTIFY_VOICE": preferred or ""},
+                capture_output=True, text=True, check=True,
             ).stdout.strip()
-            return out or "default (SAPI)"
-        except Exception:
-            return "default (SAPI)"
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ValueError("no matching installed SAPI voice; install an English voice or set NOTIFY_VOICE") from exc
+        if not out:
+            raise ValueError("no matching installed SAPI voice")
+        return out
 
-    return "default"
+    return preferred or "en"
 
 
 # --- Sound playback -----------------------------------------------------------------
@@ -236,10 +267,11 @@ def _speak(voice: str, text: str) -> None:
 
     if PLATFORM == "win":
         # Pass the text through an env var so PowerShell never has to quote/escape it.
-        env = {**os.environ, "NOTIFY_TEXT": text}
+        env = {**os.environ, "NOTIFY_TEXT": text, "NOTIFY_VOICE": voice}
         script = (
             "Add-Type -AssemblyName System.Speech; "
             "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+            "$s.SelectVoice($env:NOTIFY_VOICE); "
             "$s.Speak($env:NOTIFY_TEXT)"
         )
         try:
@@ -252,7 +284,12 @@ def _speak(voice: str, text: str) -> None:
         return
 
     if PLATFORM == "linux":
-        for cmd in (["spd-say", "-w", text], ["espeak-ng", text], ["espeak", text]):
+        spd_voice = ["-l", "en"] if voice == "en" else ["-y", voice]
+        for cmd in (
+            ["spd-say", "-w", *spd_voice, text],
+            ["espeak-ng", "-v", voice, text],
+            ["espeak", "-v", voice, text],
+        ):
             if shutil.which(cmd[0]):
                 subprocess.run(cmd, check=False,
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -265,6 +302,7 @@ def _speak(voice: str, text: str) -> None:
 def notify(
     beats: list[dict],
     sound: str | None = None,
+    voice: str | None = None,
 ) -> str:
     """Speak a sequence of short status beats with pauses between them.
 
@@ -272,13 +310,14 @@ def notify(
     finishing a long task, hitting a blocker, asking a question, or whenever
     they asked to be pinged/notified.
 
-    On macOS, each server session takes the next installed Enhanced/Premium voice
-    in a shared round robin, or the next standard voice if none are installed.
-    The voice stays fixed for that server session. Windows uses the default SAPI
-    voice; Linux uses spd-say/espeak. 100% local, free, offline.
+    English voices are the default on every platform. On macOS, each server
+    session rotates through installed English Enhanced/Premium voices, or
+    standard English voices if none are installed. Pass voice or set NOTIFY_VOICE
+    to select a specific installed voice. 100% local, free, offline.
 
     Speech-friendly rules — the model MUST follow these when composing beats:
-    - Plain English sentences only. No tables, bullets, markdown, code, file
+    - Plain English sentences by default, unless the user requests another
+      language. No tables, bullets, markdown, code, file
       paths, URLs, long numbers, version strings, or punctuation-heavy text.
     - Each beat should be short and natural — read it out loud mentally first.
       Typical beat: one sentence, ~5–20 words. Length follows content.
@@ -303,26 +342,31 @@ def notify(
               - "ping" / "tink": gentle — low-urgency FYI
               - "submarine": distinctive, hard to miss
             Other valid names: pop, purr, morse, frog, bottle, blow.
+        voice: Optional installed voice name, such as "Samantha" or "Daniel"
+            on macOS. Overrides NOTIFY_VOICE and the English session default.
+            Use a non-English voice only when explicitly requested by the user.
 
     Returns:
         Confirmation string with voice used and beat count.
     """
+    try:
+        selected_voice = pick_voice(voice)
+    except ValueError as exc:
+        return f"Could not select voice: {exc}"
     if sound:
         _play(sound)
-
-    voice = pick_voice()
     spoken = 0
     for beat in beats:
         text = (beat.get("text") or "").strip()
         if not text:
             continue
-        _speak(voice, text)
+        _speak(selected_voice, text)
         spoken += 1
         pause = beat.get("pause_after", 0.3)
         if pause and pause > 0:
             time.sleep(min(float(pause), 5.0))
 
-    return f"Played {spoken} beat(s) with voice '{voice}' on {PLATFORM}"
+    return f"Played {spoken} beat(s) with voice '{selected_voice}' on {PLATFORM}"
 
 
 @mcp.tool()
